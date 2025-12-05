@@ -100,7 +100,7 @@ export async function GET() {
     ]);
 
     // Calculate pipeline value
-    const pipelineValue = pipelineLeads.reduce((sum, lead) => {
+    const pipelineValue = pipelineLeads.reduce((sum: number, lead: { property?: { price: number | null } | null }) => {
       return sum + (lead.property?.price ? Number(lead.property.price) : 0);
     }, 0);
 
@@ -202,15 +202,15 @@ export async function GET() {
         pipelineValue,
         conversionRate: conversionRate.toFixed(1),
       },
-      leadsBySource: leadsBySource.map((item) => ({
+      leadsBySource: leadsBySource.map((item: { source: string; _count: number }) => ({
         source: item.source,
         count: item._count,
       })),
-      pipelineBreakdown: pipelineBreakdown.map((item) => ({
+      pipelineBreakdown: pipelineBreakdown.map((item: { status: string; _count: number }) => ({
         status: item.status,
         count: item._count,
       })),
-      recentActivity: recentActivity.map((activity) => ({
+      recentActivity: recentActivity.map((activity: { id: string; action: string; entityType: string; entityId: string | null; user: { firstName: string; lastName: string }; createdAt: Date; details: string | null }) => ({
         id: activity.id,
         action: activity.action,
         entityType: activity.entityType,
@@ -219,7 +219,7 @@ export async function GET() {
         createdAt: activity.createdAt,
         details: activity.details ? JSON.parse(activity.details) : null,
       })),
-      topLeads: topLeads.map((lead) => ({
+      topLeads: topLeads.map((lead: { id: string; firstName: string; lastName: string; email: string; phone: string | null; status: string; aiScore: number | null; property?: { address: string } | null }) => ({
         id: lead.id,
         name: `${lead.firstName} ${lead.lastName}`,
         email: lead.email,
@@ -227,7 +227,7 @@ export async function GET() {
         property: lead.property?.address,
         status: lead.status,
       })),
-      todaysShowings: todaysShowings.map((showing) => ({
+      todaysShowings: todaysShowings.map((showing: { id: string; scheduledAt: Date; property: { address: string }; lead: { firstName: string; lastName: string }; status: string }) => ({
         id: showing.id,
         time: showing.scheduledAt,
         property: showing.property.address,
