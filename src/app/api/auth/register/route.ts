@@ -15,6 +15,17 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Validate role - only allow SELLER and AGENT during self-registration
+    // MANAGER and ADMIN roles must be assigned by existing admins
+    const allowedRoles = ['SELLER', 'AGENT'];
+    const normalizedRole = (role || 'AGENT').toUpperCase();
+    if (!allowedRoles.includes(normalizedRole)) {
+      return NextResponse.json(
+        { error: 'Invalid role specified' },
+        { status: 400 }
+      );
+    }
+
     // Check if user already exists
     const existingUser = await prisma.user.findUnique({
       where: { email },
@@ -48,7 +59,7 @@ export async function POST(request: NextRequest) {
         passwordHash,
         firstName,
         lastName,
-        role: role.toUpperCase(),
+        role: normalizedRole,
       },
     });
 

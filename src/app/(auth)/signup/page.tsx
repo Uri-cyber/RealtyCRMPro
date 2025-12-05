@@ -75,13 +75,32 @@ export default function SignupPage() {
     setIsLoading(true);
 
     try {
-      // Simulate API call
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      const response = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          email: formData.email,
+          password: formData.password,
+          firstName: formData.firstName,
+          lastName: formData.lastName,
+          role: formData.role,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        setErrors({ email: data.error || 'Failed to create account' });
+        return;
+      }
 
       // Redirect to onboarding
       router.push('/onboarding');
     } catch (error) {
       console.error('Signup error:', error);
+      setErrors({ email: 'An error occurred. Please try again.' });
     } finally {
       setIsLoading(false);
     }

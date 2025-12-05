@@ -34,22 +34,24 @@ model Tenant {
 }
 
 model User {
-  id              String    @id @default(uuid())
-  tenantId        String
-  email           String    @unique
-  passwordHash    String
-  firstName       String
-  lastName        String
-  phone           String?
-  profileImageUrl String?
-  role            UserRole  @default(AGENT)
-  licenseNumber   String?
-  bio             String?
-  timezone        String    @default("America/Chicago")
-  isActive        Boolean   @default(true)
-  lastLoginAt     DateTime?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  id               String    @id @default(uuid())
+  tenantId         String
+  email            String    @unique
+  passwordHash     String
+  firstName        String
+  lastName         String
+  phone            String?
+  profileImageUrl  String?
+  role             UserRole  @default(AGENT)
+  licenseNumber    String?
+  bio              String?
+  timezone         String    @default("America/Chicago")
+  isActive         Boolean   @default(true)
+  lastLoginAt      DateTime?
+  resetToken       String?   // Hashed password reset token
+  resetTokenExpiry DateTime? // Expiry time for reset token
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
   // Relations
   tenant         Tenant          @relation(fields: [tenantId], references: [id])
