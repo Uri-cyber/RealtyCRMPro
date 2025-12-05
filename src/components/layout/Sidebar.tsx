@@ -2,7 +2,7 @@
 
 import React from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import {
   LayoutDashboard,
@@ -38,6 +38,20 @@ interface SidebarProps {
 
 const Sidebar: React.FC<SidebarProps> = ({ isOpen = true, onClose }) => {
   const pathname = usePathname();
+  const router = useRouter();
+
+  const handleLogout = async () => {
+    try {
+      await fetch('/api/auth/logout', {
+        method: 'POST',
+      });
+      router.push('/login');
+    } catch (error) {
+      console.error('Logout error:', error);
+      // Still redirect to login on error
+      router.push('/login');
+    }
+  };
 
   return (
     <>
@@ -103,7 +117,10 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen = true, onClose }) => {
                 </Link>
               );
             })}
-            <button className="sidebar-nav-item w-full text-danger-600 hover:bg-danger-50 hover:text-danger-700">
+            <button
+              onClick={handleLogout}
+              className="sidebar-nav-item w-full text-danger-600 hover:bg-danger-50 hover:text-danger-700"
+            >
               <LogOut className="w-5 h-5" />
               Log Out
             </button>

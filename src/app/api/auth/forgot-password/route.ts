@@ -42,39 +42,29 @@ export async function POST(request: NextRequest) {
     const resetTokenExpiry = new Date(Date.now() + 60 * 60 * 1000);
 
     // Store the hashed token in the database
-    // Note: You'll need to add these fields to the User model in Prisma schema:
-    // resetToken String?
-    // resetTokenExpiry DateTime?
-    // For now, we'll just log this - in production you'd save to DB
-    console.log('Password reset requested for:', {
-      email: user.email,
-      userId: user.id,
-      tokenHash: resetTokenHash,
-      expiry: resetTokenExpiry,
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        resetToken: resetTokenHash,
+        resetTokenExpiry: resetTokenExpiry,
+      },
     });
 
-    // In production, you would:
-    // 1. Save the token hash to the database:
-    // await prisma.user.update({
-    //   where: { id: user.id },
-    //   data: {
-    //     resetToken: resetTokenHash,
-    //     resetTokenExpiry: resetTokenExpiry,
-    //   },
-    // });
-    //
-    // 2. Send email with reset link:
-    // const resetUrl = `${process.env.NEXT_PUBLIC_APP_URL}/reset-password?token=${resetToken}`;
+    // In production, send email with reset link using SendGrid/Twilio
+    // For now, log the reset URL in development
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+    const resetUrl = `${appUrl}/reset-password?token=${resetToken}`;
+
+    if (process.env.NODE_ENV === 'development') {
+      console.log('Password reset URL (dev only):', resetUrl);
+    }
+
+    // TODO: Integrate with SendGrid to send actual reset email
     // await sendEmail({
     //   to: user.email,
     //   subject: 'Reset your password',
     //   html: `Click here to reset your password: <a href="${resetUrl}">${resetUrl}</a>`,
     // });
-
-    // For development, log the reset URL
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
-    const resetUrl = `${appUrl}/reset-password?token=${resetToken}`;
-    console.log('Password reset URL (dev only):', resetUrl);
 
     return NextResponse.json({
       success: true,
