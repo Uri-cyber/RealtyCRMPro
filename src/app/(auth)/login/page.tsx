@@ -14,13 +14,14 @@ export default function LoginPage() {
     email: '',
     password: '',
   });
-  const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
+  const [errors, setErrors] = useState<{ email?: string; password?: string; general?: string }>({});
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
-    if (errors[name as keyof typeof errors]) {
-      setErrors((prev) => ({ ...prev, [name]: undefined }));
+    // Clear field-specific error and general error when user types
+    if (errors[name as keyof typeof errors] || errors.general) {
+      setErrors((prev) => ({ ...prev, [name]: undefined, general: undefined }));
     }
   };
 
@@ -49,13 +50,29 @@ export default function LoginPage() {
     setIsLoading(true);
 
     try {
-      // Simulate API call
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      const response = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          email: formData.email,
+          password: formData.password,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        setErrors({ general: data.error || 'Invalid email or password' });
+        return;
+      }
 
       // Redirect to dashboard on success
       router.push('/dashboard');
     } catch (error) {
       console.error('Login error:', error);
+      setErrors({ general: 'An error occurred. Please try again.' });
     } finally {
       setIsLoading(false);
     }
@@ -70,6 +87,12 @@ export default function LoginPage() {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-6">
+          {errors.general && (
+            <div className="p-3 text-sm text-danger-700 bg-danger-50 border border-danger-200 rounded-lg">
+              {errors.general}
+            </div>
+          )}
+
           <Input
             name="email"
             type="email"
