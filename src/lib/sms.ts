@@ -55,9 +55,13 @@ export interface SMSStatusUpdate {
  * Handles various input formats like (512) 555-1234, 512-555-1234, +1 512 555 1234
  */
 export function normalizePhoneNumber(phone: string): string {
-  // Remove all non-digit characters except leading +
-  const hasPlus = phone.startsWith('+');
+  // Remove all non-digit characters
   const digits = phone.replace(/\D/g, '');
+
+  // If empty, return as-is
+  if (!digits) {
+    return phone;
+  }
 
   // If already has country code (11 digits starting with 1 for US)
   if (digits.length === 11 && digits.startsWith('1')) {
@@ -69,13 +73,8 @@ export function normalizePhoneNumber(phone: string): string {
     return `+1${digits}`;
   }
 
-  // If has leading + and proper length, use as-is
-  if (hasPlus && digits.length >= 10) {
-    return `+${digits}`;
-  }
-
-  // Return with + prefix if not already present
-  return hasPlus ? `+${digits}` : `+${digits}`;
+  // For international numbers or other formats, ensure + prefix
+  return `+${digits}`;
 }
 
 /**

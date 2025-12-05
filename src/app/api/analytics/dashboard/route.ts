@@ -2,6 +2,20 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { getSession } from '@/lib/auth';
 
+/**
+ * Safely parses JSON with error handling
+ * Returns null if parsing fails instead of throwing
+ */
+function safeJsonParse(json: string | null): unknown {
+  if (!json) return null;
+  try {
+    return JSON.parse(json);
+  } catch {
+    console.error('Failed to parse JSON:', json.substring(0, 100));
+    return null;
+  }
+}
+
 // GET /api/analytics/dashboard - Get dashboard metrics
 export async function GET() {
   try {
@@ -217,7 +231,7 @@ export async function GET() {
         entityId: activity.entityId,
         user: `${activity.user.firstName} ${activity.user.lastName}`,
         createdAt: activity.createdAt,
-        details: activity.details ? JSON.parse(activity.details) : null,
+        details: safeJsonParse(activity.details),
       })),
       topLeads: topLeads.map((lead: { id: string; firstName: string; lastName: string; email: string; phone: string | null; status: string; aiScore: number | null; property?: { address: string } | null }) => ({
         id: lead.id,

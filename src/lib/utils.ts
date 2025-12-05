@@ -71,6 +71,21 @@ export function truncateText(text: string, maxLength: number): string {
   return text.slice(0, maxLength).trim() + '...';
 }
 
+// Lead scoring constants
+const LEAD_SCORE = {
+  EMAIL_OPEN_POINTS: 5,
+  EMAIL_OPEN_MAX: 20,
+  PROPERTY_VIEW_POINTS: 10,
+  PROPERTY_VIEW_MAX: 30,
+  SHOWING_POINTS: 15,
+  SHOWING_MAX: 30,
+  RECENCY_7_DAYS: 20,
+  RECENCY_14_DAYS: 15,
+  RECENCY_30_DAYS: 10,
+  RECENCY_60_DAYS: 5,
+  MAX_SCORE: 100,
+} as const;
+
 export function calculateLeadScore(lead: {
   emailOpens?: number;
   propertyViews?: number;
@@ -80,22 +95,22 @@ export function calculateLeadScore(lead: {
   let score = 0;
 
   // Email engagement (max 20 points)
-  score += Math.min((lead.emailOpens || 0) * 5, 20);
+  score += Math.min((lead.emailOpens || 0) * LEAD_SCORE.EMAIL_OPEN_POINTS, LEAD_SCORE.EMAIL_OPEN_MAX);
 
   // Property interest (max 30 points)
-  score += Math.min((lead.propertyViews || 0) * 10, 30);
+  score += Math.min((lead.propertyViews || 0) * LEAD_SCORE.PROPERTY_VIEW_POINTS, LEAD_SCORE.PROPERTY_VIEW_MAX);
 
   // Showings (max 30 points)
-  score += Math.min((lead.showingsAttended || 0) * 15, 30);
+  score += Math.min((lead.showingsAttended || 0) * LEAD_SCORE.SHOWING_POINTS, LEAD_SCORE.SHOWING_MAX);
 
   // Recency bonus (max 20 points)
   const daysActive = lead.daysActive || 0;
-  if (daysActive <= 7) score += 20;
-  else if (daysActive <= 14) score += 15;
-  else if (daysActive <= 30) score += 10;
-  else if (daysActive <= 60) score += 5;
+  if (daysActive <= 7) score += LEAD_SCORE.RECENCY_7_DAYS;
+  else if (daysActive <= 14) score += LEAD_SCORE.RECENCY_14_DAYS;
+  else if (daysActive <= 30) score += LEAD_SCORE.RECENCY_30_DAYS;
+  else if (daysActive <= 60) score += LEAD_SCORE.RECENCY_60_DAYS;
 
-  return Math.min(score, 100);
+  return Math.min(score, LEAD_SCORE.MAX_SCORE);
 }
 
 export function getPipelineStageColor(stage: string): string {
@@ -118,7 +133,34 @@ export function getPropertyStatusBadge(status: string): { label: string; variant
   return statuses[status] || { label: status, variant: 'badge-neutral' };
 }
 
+/**
+ * Generates a cryptographically secure unique ID
+ * Uses crypto.randomUUID() which is available in modern browsers and Node.js
+ */
 export function generateId(): string {
-  return Math.random().toString(36).substring(2, 15) +
-         Math.random().toString(36).substring(2, 15);
+  // Use crypto.randomUUID() for cryptographically secure IDs
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+
+  // Fallback for environments without crypto.randomUUID
+  // Uses crypto.getRandomValues for better randomness than Math.random
+  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+    const array = new Uint8Array(16);
+    crypto.getRandomValues(array);
+    // Format as UUID v4
+    array[6] = (array[6] & 0x0f) | 0x40;
+    array[8] = (array[8] & 0x3f) | 0x80;
+    const hex = Array.from(array, (b) => b.toString(16).padStart(2, '0')).join('');
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  }
+
+  // Last resort fallback - not cryptographically secure
+  // Should rarely be needed in modern environments
+  console.warn('Using non-cryptographic ID generation');
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
 }

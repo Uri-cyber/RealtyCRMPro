@@ -2,6 +2,24 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { getSession } from '@/lib/auth';
 
+// Pagination constants
+const PAGINATION = {
+  DEFAULT_PAGE: 1,
+  DEFAULT_LIMIT: 50,
+  MAX_LIMIT: 100, // Prevent excessive data fetching
+  MIN_LIMIT: 1,
+} as const;
+
+// AI Score constants for lead scoring algorithm
+const AI_SCORE = {
+  BASE: 30,
+  EMAIL_BONUS: 20,
+  PHONE_BONUS: 15,
+  PROPERTY_INTEREST_BONUS: 15,
+  REFERRAL_BONUS: 10,
+  PAID_AD_BONUS: 5,
+} as const;
+
 // GET /api/leads - List all leads for the current user's tenant
 export async function GET(request: NextRequest) {
   try {
@@ -15,8 +33,11 @@ export async function GET(request: NextRequest) {
     const status = searchParams.get('status');
     const propertyId = searchParams.get('propertyId');
     const source = searchParams.get('source');
-    const page = parseInt(searchParams.get('page') || '1');
-    const limit = parseInt(searchParams.get('limit') || '50');
+    const page = Math.max(PAGINATION.MIN_LIMIT, parseInt(searchParams.get('page') || String(PAGINATION.DEFAULT_PAGE)));
+
+    // Enforce pagination limits to prevent DoS
+    const requestedLimit = parseInt(searchParams.get('limit') || String(PAGINATION.DEFAULT_LIMIT));
+    const limit = Math.min(Math.max(requestedLimit, PAGINATION.MIN_LIMIT), PAGINATION.MAX_LIMIT);
     const skip = (page - 1) * limit;
 
     const where = {
@@ -109,12 +130,12 @@ export async function POST(request: NextRequest) {
     }
 
     // Calculate initial AI score based on available data
-    let aiScore = 30; // Base score
-    if (email) aiScore += 20;
-    if (phone) aiScore += 15;
-    if (propertyId) aiScore += 15;
-    if (source === 'REFERRAL') aiScore += 10;
-    if (source === 'FACEBOOK_AD' || source === 'GOOGLE_AD') aiScore += 5;
+    let aiScore = AI_SCORE.BASE;
+    if (email) aiScore += AI_SCORE.EMAIL_BONUS;
+    if (phone) aiScore += AI_SCORE.PHONE_BONUS;
+    if (propertyId) aiScore += AI_SCORE.PROPERTY_INTEREST_BONUS;
+    if (source === 'REFERRAL') aiScore += AI_SCORE.REFERRAL_BONUS;
+    if (source === 'FACEBOOK_AD' || source === 'GOOGLE_AD') aiScore += AI_SCORE.PAID_AD_BONUS;
 
     const lead = await prisma.lead.create({
       data: {

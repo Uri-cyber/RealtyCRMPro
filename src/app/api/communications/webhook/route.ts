@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/db';
 import crypto from 'crypto';
 
 /**
- * Validates Twilio webhook signature
+ * Validates Twilio webhook signature using constant-time comparison
  * This ensures the request is coming from Twilio and not a malicious actor
  */
 function validateTwilioSignature(
@@ -22,7 +21,16 @@ function validateTwilioSignature(
     .update(Buffer.from(data, 'utf-8'))
     .digest('base64');
 
-  return signature === expectedSignature;
+  // Use constant-time comparison to prevent timing attacks
+  try {
+    return crypto.timingSafeEqual(
+      Buffer.from(signature),
+      Buffer.from(expectedSignature)
+    );
+  } catch {
+    // If buffers have different lengths, they don't match
+    return false;
+  }
 }
 
 /**
@@ -45,8 +53,14 @@ export async function POST(request: NextRequest) {
       params[key] = value.toString();
     });
 
-    // Validate signature in production
-    if (process.env.NODE_ENV === 'production' && authToken && twilioSignature) {
+    // Always validate Twilio webhook signature when auth token is configured
+    // This prevents forged webhook callbacks in any environment
+    if (authToken) {
+      if (!twilioSignature) {
+        console.error('Missing Twilio signature header');
+        return NextResponse.json({ error: 'Missing signature' }, { status: 403 });
+      }
+
       const url = request.url;
       const isValid = validateTwilioSignature(twilioSignature, url, params, authToken);
 
@@ -54,6 +68,15 @@ export async function POST(request: NextRequest) {
         console.error('Invalid Twilio signature');
         return NextResponse.json({ error: 'Invalid signature' }, { status: 403 });
       }
+    } else {
+      // Auth token not configured - reject the request in any environment
+      // except for explicit local testing without Twilio
+      if (process.env.NODE_ENV !== 'development') {
+        console.error('Twilio auth token not configured');
+        return NextResponse.json({ error: 'Webhook not configured' }, { status: 503 });
+      }
+      // In development without Twilio config, log a warning
+      console.warn('Twilio webhook validation skipped - TWILIO_AUTH_TOKEN not configured');
     }
 
     const messageSid = params.MessageSid;

@@ -2,6 +2,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { getSession } from '@/lib/auth';
 
+// Pagination constants
+const PAGINATION = {
+  DEFAULT_PAGE: 1,
+  DEFAULT_LIMIT: 20,
+  MAX_LIMIT: 100, // Prevent excessive data fetching
+  MIN_LIMIT: 1,
+} as const;
+
 // GET /api/properties - List all properties for the current user's tenant
 export async function GET(request: NextRequest) {
   try {
@@ -13,8 +21,11 @@ export async function GET(request: NextRequest) {
 
     const { searchParams } = new URL(request.url);
     const status = searchParams.get('status');
-    const page = parseInt(searchParams.get('page') || '1');
-    const limit = parseInt(searchParams.get('limit') || '20');
+    const page = Math.max(PAGINATION.MIN_LIMIT, parseInt(searchParams.get('page') || String(PAGINATION.DEFAULT_PAGE)));
+
+    // Enforce pagination limits to prevent DoS
+    const requestedLimit = parseInt(searchParams.get('limit') || String(PAGINATION.DEFAULT_LIMIT));
+    const limit = Math.min(Math.max(requestedLimit, PAGINATION.MIN_LIMIT), PAGINATION.MAX_LIMIT);
     const skip = (page - 1) * limit;
 
     const where = {
