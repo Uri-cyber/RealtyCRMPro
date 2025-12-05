@@ -55,14 +55,17 @@ model User {
   updatedAt        DateTime  @updatedAt
 
   // Relations
-  tenant          Tenant            @relation(fields: [tenantId], references: [id])
-  properties      Property[]
-  leads           Lead[]            @relation("AssignedAgent")
-  showings        Showing[]
-  communications  Communication[]
-  activities      ActivityLog[]
-  templates       MessageTemplate[]
-  sentInvitations Invitation[]
+  tenant               Tenant             @relation(fields: [tenantId], references: [id])
+  properties           Property[]
+  leads                Lead[]             @relation("AssignedAgent")
+  showings             Showing[]
+  communications       Communication[]
+  activities           ActivityLog[]
+  templates            MessageTemplate[]
+  sentInvitations      Invitation[]
+  smsConversations     SMSConversation[]  @relation("SMSAssignedAgent")
+  sentSMSMessages      SMSMessage[]       @relation("SMSSentByUser")
+  aiInteractions       AIInteractionLog[] @relation("AIInteractionUser")
 
   @@index([tenantId])
   @@index([email])
@@ -158,12 +161,14 @@ model Lead {
   updatedAt            DateTime   @updatedAt
 
   // Relations
-  tenant         Tenant          @relation(fields: [tenantId], references: [id])
-  property       Property?       @relation(fields: [propertyId], references: [id])
-  assignedAgent  User?           @relation("AssignedAgent", fields: [assignedAgentId], references: [id])
-  showings       Showing[]
-  communications Communication[]
-  documents      Document[]
+  tenant           Tenant             @relation(fields: [tenantId], references: [id])
+  property         Property?          @relation(fields: [propertyId], references: [id])
+  assignedAgent    User?              @relation("AssignedAgent", fields: [assignedAgentId], references: [id])
+  showings         Showing[]
+  communications   Communication[]
+  documents        Document[]
+  smsConversations SMSConversation[]
+  aiInteractions   AIInteractionLog[]
 
   @@index([tenantId])
   @@index([propertyId])
@@ -382,4 +387,169 @@ model ActivityLog {
   @@index([entityType, entityId])
   @@index([createdAt])
   @@map("activity_logs")
+}
+
+// ============================================
+// SMS Conversations
+// ============================================
+
+model SMSConversation {
+  id                 String                  @id @default(uuid())
+  tenantId           String
+  leadId             String
+  assignedAgentId    String?
+  phoneNumber        String                  @db.VarChar(20) // Lead's phone number (E.164 format)
+  twilioPhoneNumber  String?                 @db.VarChar(20) // Twilio number used for this conversation
+  status             SMSConversationStatus   @default(ACTIVE)
+  lastMessageAt      DateTime?
+  lastMessagePreview String?                 @db.VarChar(160) // Preview of last message
+  unreadCount        Int                     @default(0)
+  isAIEnabled        Boolean                 @default(true) // Whether AI auto-responses are enabled
+  aiPersonality      String?                 @db.VarChar(50) // AI personality/tone setting
+  metadata           String?                 @db.Text // JSON metadata (tags, custom fields, etc.)
+  createdAt          DateTime                @default(now())
+  updatedAt          DateTime                @updatedAt
+
+  // Relations
+  lead          Lead          @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  assignedAgent User?         @relation("SMSAssignedAgent", fields: [assignedAgentId], references: [id])
+  messages      SMSMessage[]
+  aiLogs        AIInteractionLog[]
+
+  @@unique([tenantId, phoneNumber]) // One conversation per phone number per tenant
+  @@index([tenantId])
+  @@index([leadId])
+  @@index([assignedAgentId])
+  @@index([status])
+  @@index([lastMessageAt])
+  @@index([phoneNumber])
+  @@map("sms_conversations")
+}
+
+enum SMSConversationStatus {
+  ACTIVE
+  PAUSED        // Temporarily paused (e.g., awaiting human review)
+  CLOSED        // Conversation ended
+  OPTED_OUT     // Lead opted out of SMS
+  BLOCKED       // Blocked by system or agent
+}
+
+model SMSMessage {
+  id               String           @id @default(uuid())
+  tenantId         String
+  conversationId   String
+  direction        SMSDirection
+  fromNumber       String           @db.VarChar(20)
+  toNumber         String           @db.VarChar(20)
+  body             String           @db.Text
+  mediaUrls        String?          @db.Text // JSON array of media URLs (MMS)
+  status           SMSMessageStatus @default(QUEUED)
+  twilioSid        String?          @db.VarChar(50) // Twilio message SID for tracking
+  errorCode        String?          @db.VarChar(20) // Twilio error code if failed
+  errorMessage     String?          @db.VarChar(255)
+  isAIGenerated    Boolean          @default(false)
+  aiInteractionId  String?          // Link to AI interaction that generated this message
+  sentByUserId     String?          // Agent who sent (for outbound manual messages)
+  segmentCount     Int              @default(1) // Number of SMS segments
+  price            Decimal?         @db.Decimal(10, 5) // Cost from Twilio
+  sentAt           DateTime?
+  deliveredAt      DateTime?
+  readAt           DateTime?
+  createdAt        DateTime         @default(now())
+
+  // Relations
+  conversation  SMSConversation   @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  aiInteraction AIInteractionLog? @relation(fields: [aiInteractionId], references: [id])
+  sentByUser    User?             @relation("SMSSentByUser", fields: [sentByUserId], references: [id])
+
+  @@index([tenantId])
+  @@index([conversationId])
+  @@index([twilioSid])
+  @@index([status])
+  @@index([createdAt])
+  @@index([sentByUserId])
+  @@map("sms_messages")
+}
+
+enum SMSDirection {
+  INBOUND   // Message from lead to agent
+  OUTBOUND  // Message from agent/AI to lead
+}
+
+enum SMSMessageStatus {
+  QUEUED      // Waiting to be sent
+  SENDING     // Currently being sent
+  SENT        // Sent to carrier
+  DELIVERED   // Delivered to device
+  READ        // Read by recipient (if supported)
+  FAILED      // Failed to send
+  UNDELIVERED // Could not be delivered
+}
+
+// ============================================
+// AI Interaction Logs
+// ============================================
+
+model AIInteractionLog {
+  id                String              @id @default(uuid())
+  tenantId          String
+  conversationId    String?             // SMS conversation this relates to
+  leadId            String?             // Lead this interaction relates to
+  userId            String?             // User who triggered the interaction (if applicable)
+  interactionType   AIInteractionType
+  modelName         String              @db.VarChar(50) // e.g., 'gpt-4', 'claude-3', 'gpt-3.5-turbo'
+  modelProvider     String              @db.VarChar(30) // e.g., 'openai', 'anthropic', 'azure'
+  promptTokens      Int                 @default(0)
+  completionTokens  Int                 @default(0)
+  totalTokens       Int                 @default(0)
+  promptText        String?             @db.Text // The prompt sent to the AI
+  responseText      String?             @db.Text // The response from the AI
+  systemPrompt      String?             @db.Text // System prompt used
+  temperature       Float?              // Temperature setting used
+  status            AIInteractionStatus @default(PENDING)
+  latencyMs         Int?                // Response time in milliseconds
+  cost              Decimal?            @db.Decimal(10, 6) // Estimated cost
+  errorMessage      String?             @db.Text
+  metadata          String?             @db.Text // JSON metadata (function calls, tool usage, etc.)
+  feedbackRating    Int?                // User feedback rating (1-5)
+  feedbackComment   String?             @db.Text // User feedback comment
+  wasEdited         Boolean             @default(false) // Whether the AI response was edited before sending
+  editedText        String?             @db.Text // The edited version if wasEdited is true
+  createdAt         DateTime            @default(now())
+  completedAt       DateTime?
+
+  // Relations
+  conversation SMSConversation? @relation(fields: [conversationId], references: [id])
+  lead         Lead?            @relation(fields: [leadId], references: [id])
+  user         User?            @relation("AIInteractionUser", fields: [userId], references: [id])
+  messages     SMSMessage[]     // Messages generated from this interaction
+
+  @@index([tenantId])
+  @@index([conversationId])
+  @@index([leadId])
+  @@index([userId])
+  @@index([interactionType])
+  @@index([status])
+  @@index([createdAt])
+  @@index([modelName])
+  @@map("ai_interaction_logs")
+}
+
+enum AIInteractionType {
+  SMS_RESPONSE       // AI-generated SMS response
+  LEAD_SCORING       // AI-powered lead scoring
+  SENTIMENT_ANALYSIS // Sentiment analysis of messages
+  SUMMARY            // Conversation/lead summary generation
+  PROPERTY_MATCH     // AI property matching for leads
+  FOLLOW_UP_SUGGEST  // AI-suggested follow-up actions
+  TRANSLATION        // Message translation
+  CUSTOM             // Custom AI interaction
+}
+
+enum AIInteractionStatus {
+  PENDING     // Waiting to be processed
+  PROCESSING  // Currently being processed
+  COMPLETED   // Successfully completed
+  FAILED      // Failed with error
+  CANCELLED   // Cancelled by user/system
 }
