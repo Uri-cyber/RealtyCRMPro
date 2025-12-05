@@ -25,10 +25,11 @@ model Tenant {
   updatedAt        DateTime  @updatedAt
 
   // Relations
-  users      User[]
-  properties Property[]
-  leads      Lead[]
-  showings   Showing[]
+  users       User[]
+  properties  Property[]
+  leads       Lead[]
+  showings    Showing[]
+  invitations Invitation[]
 
   @@map("tenants")
 }
@@ -54,13 +55,14 @@ model User {
   updatedAt        DateTime  @updatedAt
 
   // Relations
-  tenant         Tenant          @relation(fields: [tenantId], references: [id])
-  properties     Property[]
-  leads          Lead[]          @relation("AssignedAgent")
-  showings       Showing[]
-  communications Communication[]
-  activities     ActivityLog[]
-  templates      MessageTemplate[]
+  tenant          Tenant            @relation(fields: [tenantId], references: [id])
+  properties      Property[]
+  leads           Lead[]            @relation("AssignedAgent")
+  showings        Showing[]
+  communications  Communication[]
+  activities      ActivityLog[]
+  templates       MessageTemplate[]
+  sentInvitations Invitation[]
 
   @@index([tenantId])
   @@index([email])
@@ -321,6 +323,39 @@ enum DocumentType {
   SURVEY
   HOA
   OTHER
+}
+
+// ============================================
+// Team Invitations
+// ============================================
+
+model Invitation {
+  id        String           @id @default(uuid())
+  tenantId  String
+  email     String
+  role      UserRole         @default(AGENT)
+  token     String           @unique // Hashed invitation token
+  status    InvitationStatus @default(PENDING)
+  invitedBy String
+  expiresAt DateTime
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  // Relations
+  tenant  Tenant @relation(fields: [tenantId], references: [id])
+  inviter User   @relation(fields: [invitedBy], references: [id])
+
+  @@index([tenantId])
+  @@index([email])
+  @@index([token])
+  @@map("invitations")
+}
+
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  EXPIRED
+  CANCELLED
 }
 
 // ============================================

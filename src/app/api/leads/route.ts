@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { getSession } from '@/lib/auth';
+import { hasPermission } from '@/lib/rbac';
 
 // Pagination constants
 const PAGINATION = {
@@ -33,6 +34,8 @@ export async function GET(request: NextRequest) {
     const status = searchParams.get('status');
     const propertyId = searchParams.get('propertyId');
     const source = searchParams.get('source');
+    const agentId = searchParams.get('agentId');
+    const view = searchParams.get('view') || 'mine'; // 'mine' | 'all' | 'unassigned'
     const page = Math.max(PAGINATION.MIN_LIMIT, parseInt(searchParams.get('page') || String(PAGINATION.DEFAULT_PAGE)));
 
     // Enforce pagination limits to prevent DoS
@@ -40,8 +43,33 @@ export async function GET(request: NextRequest) {
     const limit = Math.min(Math.max(requestedLimit, PAGINATION.MIN_LIMIT), PAGINATION.MAX_LIMIT);
     const skip = (page - 1) * limit;
 
+    // Determine agent filter based on view and permissions
+    let agentFilter: { assignedAgentId?: string | null } | undefined;
+    const canViewAll = hasPermission(session.role, 'leads:read_all');
+
+    if (agentId) {
+      // Specific agent filter - requires leads:read_all permission
+      if (!canViewAll && agentId !== session.userId) {
+        return NextResponse.json(
+          { error: 'Insufficient permissions to view other agents\' leads' },
+          { status: 403 }
+        );
+      }
+      agentFilter = { assignedAgentId: agentId };
+    } else if (view === 'all' && canViewAll) {
+      // View all leads in tenant
+      agentFilter = undefined;
+    } else if (view === 'unassigned' && canViewAll) {
+      // View unassigned leads
+      agentFilter = { assignedAgentId: null };
+    } else {
+      // Default: view own leads
+      agentFilter = { assignedAgentId: session.userId };
+    }
+
     const where = {
       tenantId: session.tenantId,
+      ...agentFilter,
       ...(status && { status: status.toUpperCase() }),
       ...(propertyId && { propertyId }),
       ...(source && { source: source.toUpperCase() }),
