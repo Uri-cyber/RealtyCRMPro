@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
+import crypto from 'crypto';
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/db';
 import { hashPassword, generateToken, setAuthCookie, JWTPayload } from '@/lib/auth';
@@ -35,6 +36,7 @@ const registerSchema = z.object({
     .max(50, 'Last name must be less than 50 characters')
     .trim(),
   role: z.enum(['SELLER', 'AGENT']).default('AGENT'),
+  inviteToken: z.string().optional(), // Optional invitation token to join existing team
 });
 
 export async function POST(request: NextRequest) {
@@ -75,7 +77,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { email, password, firstName, lastName, role } = validationResult.data;
+    const { email, password, firstName, lastName, role, inviteToken } = validationResult.data;
 
     // Check if user already exists
     const existingUser = await prisma.user.findUnique({
@@ -95,34 +97,89 @@ export async function POST(request: NextRequest) {
     // Hash password
     const passwordHash = await hashPassword(password);
 
-    // Create tenant and user in a transaction for atomicity
-    const result = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-      // Create tenant first (new user gets their own tenant)
-      const tenant = await tx.tenant.create({
-        data: {
-          name: `${firstName} ${lastName}`,
-          subscriptionTier: 'starter',
-          maxUsers: 1,
-          maxListings: 25,
+    let user;
+
+    // Check if joining via invitation
+    if (inviteToken) {
+      const hashedToken = crypto.createHash('sha256').update(inviteToken).digest('hex');
+
+      const invitation = await prisma.invitation.findFirst({
+        where: {
+          token: hashedToken,
+          status: 'PENDING',
+          email, // Email must match invitation
         },
+        include: { tenant: true },
       });
 
-      // Create user
-      const user = await tx.user.create({
-        data: {
-          tenantId: tenant.id,
-          email,
-          passwordHash,
-          firstName,
-          lastName,
-          role,
-        },
+      if (!invitation) {
+        return NextResponse.json(
+          { error: 'Invalid or expired invitation' },
+          { status: 400, headers: getRateLimitHeaders(rateLimitResult) }
+        );
+      }
+
+      if (new Date() > invitation.expiresAt) {
+        await prisma.invitation.update({
+          where: { id: invitation.id },
+          data: { status: 'EXPIRED' },
+        });
+        return NextResponse.json(
+          { error: 'This invitation has expired' },
+          { status: 400, headers: getRateLimitHeaders(rateLimitResult) }
+        );
+      }
+
+      // Create user and mark invitation as accepted
+      user = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+        const newUser = await tx.user.create({
+          data: {
+            tenantId: invitation.tenantId,
+            email,
+            passwordHash,
+            firstName,
+            lastName,
+            role: invitation.role, // Use role from invitation, not from request
+          },
+        });
+
+        await tx.invitation.update({
+          where: { id: invitation.id },
+          data: { status: 'ACCEPTED' },
+        });
+
+        return newUser;
+      });
+    } else {
+      // Create new tenant and user
+      const result = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+        // Create tenant first (new user gets their own tenant)
+        const tenant = await tx.tenant.create({
+          data: {
+            name: `${firstName} ${lastName}'s Team`,
+            subscriptionTier: 'starter',
+            maxUsers: 5, // Allow 5 users by default
+            maxListings: 25,
+          },
+        });
+
+        // Create user as ADMIN (first user of tenant is always admin)
+        const newUser = await tx.user.create({
+          data: {
+            tenantId: tenant.id,
+            email,
+            passwordHash,
+            firstName,
+            lastName,
+            role: 'ADMIN', // First user is always admin
+          },
+        });
+
+        return { tenant, user: newUser };
       });
 
-      return { tenant, user };
-    });
-
-    const { user } = result;
+      user = result.user;
+    }
 
     // Generate JWT token
     const tokenPayload: JWTPayload = {

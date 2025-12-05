@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { getSession } from '@/lib/auth';
+import { hasPermission } from '@/lib/rbac';
 
 // Pagination constants
 const PAGINATION = {
@@ -21,6 +22,8 @@ export async function GET(request: NextRequest) {
 
     const { searchParams } = new URL(request.url);
     const status = searchParams.get('status');
+    const userId = searchParams.get('userId');
+    const view = searchParams.get('view') || 'all'; // 'mine' | 'all'
     const page = Math.max(PAGINATION.MIN_LIMIT, parseInt(searchParams.get('page') || String(PAGINATION.DEFAULT_PAGE)));
 
     // Enforce pagination limits to prevent DoS
@@ -28,8 +31,33 @@ export async function GET(request: NextRequest) {
     const limit = Math.min(Math.max(requestedLimit, PAGINATION.MIN_LIMIT), PAGINATION.MAX_LIMIT);
     const skip = (page - 1) * limit;
 
+    // Determine user filter based on view and permissions
+    let userFilter: { userId?: string } | undefined;
+    const canViewAll = hasPermission(session.role, 'properties:read_all');
+
+    if (userId) {
+      // Specific user filter - requires properties:read_all permission
+      if (!canViewAll && userId !== session.userId) {
+        return NextResponse.json(
+          { error: 'Insufficient permissions to view other agents\' properties' },
+          { status: 403 }
+        );
+      }
+      userFilter = { userId };
+    } else if (view === 'mine') {
+      // View own properties only
+      userFilter = { userId: session.userId };
+    } else if (canViewAll) {
+      // View all properties in tenant
+      userFilter = undefined;
+    } else {
+      // Default for non-privileged users: view own properties
+      userFilter = { userId: session.userId };
+    }
+
     const where = {
       tenantId: session.tenantId,
+      ...userFilter,
       ...(status && { status: status.toUpperCase() }),
     };
 
