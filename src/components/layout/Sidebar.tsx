@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
@@ -15,6 +15,8 @@ import {
   HelpCircle,
   LogOut,
   Building2,
+  Shield,
+  UserCog,
 } from 'lucide-react';
 
 const navigation = [
@@ -24,6 +26,10 @@ const navigation = [
   { name: 'Calendar', href: '/calendar', icon: Calendar },
   { name: 'Messages', href: '/messages', icon: MessageSquare },
   { name: 'Reports', href: '/reports', icon: BarChart3 },
+];
+
+const adminNavigation = [
+  { name: 'User Management', href: '/admin/users', icon: UserCog },
 ];
 
 const bottomNavigation = [
@@ -39,6 +45,25 @@ interface SidebarProps {
 const Sidebar: React.FC<SidebarProps> = ({ isOpen = true, onClose }) => {
   const pathname = usePathname();
   const router = useRouter();
+  const [userRole, setUserRole] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchUserRole = async () => {
+      try {
+        const res = await fetch('/api/user/profile');
+        if (res.ok) {
+          const data = await res.json();
+          setUserRole(data.user?.role || null);
+        }
+      } catch (error) {
+        console.error('Failed to fetch user role:', error);
+      }
+    };
+
+    fetchUserRole();
+  }, []);
+
+  const isAdmin = userRole === 'ADMIN';
 
   const handleLogout = async () => {
     try {
@@ -97,6 +122,34 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen = true, onClose }) => {
                 </Link>
               );
             })}
+
+            {/* Admin Section */}
+            {isAdmin && (
+              <>
+                <div className="pt-4 pb-2">
+                  <div className="flex items-center gap-2 px-3 text-xs font-semibold text-neutral-400 uppercase tracking-wider">
+                    <Shield className="w-3 h-3" />
+                    Admin
+                  </div>
+                </div>
+                {adminNavigation.map((item) => {
+                  const isActive = pathname === item.href || pathname.startsWith(item.href + '/');
+                  return (
+                    <Link
+                      key={item.name}
+                      href={item.href}
+                      className={cn(
+                        isActive ? 'sidebar-nav-item-active' : 'sidebar-nav-item'
+                      )}
+                      onClick={onClose}
+                    >
+                      <item.icon className="w-5 h-5" />
+                      {item.name}
+                    </Link>
+                  );
+                })}
+              </>
+            )}
           </nav>
 
           {/* Bottom Navigation */}
