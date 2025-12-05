@@ -1,30 +1,80 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { prisma } from '@/lib/db';
 import { hashPassword, generateToken, setAuthCookie, JWTPayload } from '@/lib/auth';
+import {
+  checkRateLimit,
+  getClientIp,
+  getRateLimitHeaders,
+  RATE_LIMIT_CONFIGS,
+} from '@/lib/rate-limit';
+
+// Password strength validation regex
+const PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]/;
+
+// Validation schema for registration
+const registerSchema = z.object({
+  email: z.string().email('Invalid email format').toLowerCase(),
+  password: z
+    .string()
+    .min(8, 'Password must be at least 8 characters')
+    .max(128, 'Password must be less than 128 characters')
+    .regex(
+      PASSWORD_REGEX,
+      'Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character (@$!%*?&)'
+    ),
+  firstName: z
+    .string()
+    .min(1, 'First name is required')
+    .max(50, 'First name must be less than 50 characters')
+    .trim(),
+  lastName: z
+    .string()
+    .min(1, 'Last name is required')
+    .max(50, 'Last name must be less than 50 characters')
+    .trim(),
+  role: z.enum(['SELLER', 'AGENT']).default('AGENT'),
+});
 
 export async function POST(request: NextRequest) {
+  const clientIp = getClientIp(request);
+
+  // Check rate limit
+  const rateLimitResult = checkRateLimit(clientIp, 'register', RATE_LIMIT_CONFIGS.register);
+
+  if (!rateLimitResult.allowed) {
+    return NextResponse.json(
+      {
+        error: 'Too many registration attempts. Please try again later.',
+        retryAfter: rateLimitResult.retryAfter,
+      },
+      {
+        status: 429,
+        headers: getRateLimitHeaders(rateLimitResult),
+      }
+    );
+  }
+
   try {
     const body = await request.json();
-    const { email, password, firstName, lastName, role = 'AGENT' } = body;
 
-    // Validate required fields
-    if (!email || !password || !firstName || !lastName) {
+    // Validate input with Zod
+    const validationResult = registerSchema.safeParse(body);
+
+    if (!validationResult.success) {
       return NextResponse.json(
-        { error: 'Missing required fields' },
-        { status: 400 }
+        {
+          error: 'Validation failed',
+          details: validationResult.error.flatten(),
+        },
+        {
+          status: 400,
+          headers: getRateLimitHeaders(rateLimitResult),
+        }
       );
     }
 
-    // Validate role - only allow SELLER and AGENT during self-registration
-    // MANAGER and ADMIN roles must be assigned by existing admins
-    const allowedRoles = ['SELLER', 'AGENT'];
-    const normalizedRole = (role || 'AGENT').toUpperCase();
-    if (!allowedRoles.includes(normalizedRole)) {
-      return NextResponse.json(
-        { error: 'Invalid role specified' },
-        { status: 400 }
-      );
-    }
+    const { email, password, firstName, lastName, role } = validationResult.data;
 
     // Check if user already exists
     const existingUser = await prisma.user.findUnique({
@@ -34,34 +84,44 @@ export async function POST(request: NextRequest) {
     if (existingUser) {
       return NextResponse.json(
         { error: 'User with this email already exists' },
-        { status: 409 }
+        {
+          status: 409,
+          headers: getRateLimitHeaders(rateLimitResult),
+        }
       );
     }
 
     // Hash password
     const passwordHash = await hashPassword(password);
 
-    // Create tenant first (new user gets their own tenant)
-    const tenant = await prisma.tenant.create({
-      data: {
-        name: `${firstName} ${lastName}`,
-        subscriptionTier: 'starter',
-        maxUsers: 1,
-        maxListings: 25,
-      },
+    // Create tenant and user in a transaction for atomicity
+    const result = await prisma.$transaction(async (tx) => {
+      // Create tenant first (new user gets their own tenant)
+      const tenant = await tx.tenant.create({
+        data: {
+          name: `${firstName} ${lastName}`,
+          subscriptionTier: 'starter',
+          maxUsers: 1,
+          maxListings: 25,
+        },
+      });
+
+      // Create user
+      const user = await tx.user.create({
+        data: {
+          tenantId: tenant.id,
+          email,
+          passwordHash,
+          firstName,
+          lastName,
+          role,
+        },
+      });
+
+      return { tenant, user };
     });
 
-    // Create user
-    const user = await prisma.user.create({
-      data: {
-        tenantId: tenant.id,
-        email,
-        passwordHash,
-        firstName,
-        lastName,
-        role: normalizedRole,
-      },
-    });
+    const { user } = result;
 
     // Generate JWT token
     const tokenPayload: JWTPayload = {

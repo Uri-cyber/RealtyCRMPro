@@ -1,29 +1,73 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { prisma } from '@/lib/db';
 import { verifyPassword, generateToken, setAuthCookie, JWTPayload } from '@/lib/auth';
+import {
+  checkRateLimit,
+  getClientIp,
+  getRateLimitHeaders,
+  RATE_LIMIT_CONFIGS,
+  resetRateLimit,
+} from '@/lib/rate-limit';
+
+// Validation schema for login
+const loginSchema = z.object({
+  email: z.string().email('Invalid email format'),
+  password: z.string().min(1, 'Password is required'),
+});
 
 export async function POST(request: NextRequest) {
+  const clientIp = getClientIp(request);
+
+  // Check rate limit
+  const rateLimitResult = checkRateLimit(clientIp, 'login', RATE_LIMIT_CONFIGS.login);
+
+  if (!rateLimitResult.allowed) {
+    return NextResponse.json(
+      {
+        error: 'Too many login attempts. Please try again later.',
+        retryAfter: rateLimitResult.retryAfter,
+      },
+      {
+        status: 429,
+        headers: getRateLimitHeaders(rateLimitResult),
+      }
+    );
+  }
+
   try {
     const body = await request.json();
-    const { email, password } = body;
 
-    // Validate required fields
-    if (!email || !password) {
+    // Validate input with Zod
+    const validationResult = loginSchema.safeParse(body);
+
+    if (!validationResult.success) {
       return NextResponse.json(
-        { error: 'Email and password are required' },
-        { status: 400 }
+        {
+          error: 'Invalid request',
+          details: validationResult.error.flatten(),
+        },
+        {
+          status: 400,
+          headers: getRateLimitHeaders(rateLimitResult),
+        }
       );
     }
 
+    const { email, password } = validationResult.data;
+
     // Find user
     const user = await prisma.user.findUnique({
-      where: { email },
+      where: { email: email.toLowerCase() },
     });
 
     if (!user) {
       return NextResponse.json(
         { error: 'Invalid email or password' },
-        { status: 401 }
+        {
+          status: 401,
+          headers: getRateLimitHeaders(rateLimitResult),
+        }
       );
     }
 
@@ -33,9 +77,15 @@ export async function POST(request: NextRequest) {
     if (!isValidPassword) {
       return NextResponse.json(
         { error: 'Invalid email or password' },
-        { status: 401 }
+        {
+          status: 401,
+          headers: getRateLimitHeaders(rateLimitResult),
+        }
       );
     }
+
+    // Successful login - reset rate limit for this IP
+    resetRateLimit(clientIp, 'login');
 
     // Update last login
     await prisma.user.update({

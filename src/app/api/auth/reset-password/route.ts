@@ -1,28 +1,70 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { prisma } from '@/lib/db';
 import { hashPassword } from '@/lib/auth';
 import crypto from 'crypto';
+import {
+  checkRateLimit,
+  getClientIp,
+  getRateLimitHeaders,
+  RATE_LIMIT_CONFIGS,
+} from '@/lib/rate-limit';
+
+// Password strength validation regex
+const PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]/;
+
+// Validation schema for reset password
+const resetPasswordSchema = z.object({
+  token: z.string().min(1, 'Reset token is required'),
+  password: z
+    .string()
+    .min(8, 'Password must be at least 8 characters')
+    .max(128, 'Password must be less than 128 characters')
+    .regex(
+      PASSWORD_REGEX,
+      'Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character (@$!%*?&)'
+    ),
+});
 
 export async function POST(request: NextRequest) {
+  const clientIp = getClientIp(request);
+
+  // Check rate limit
+  const rateLimitResult = checkRateLimit(clientIp, 'resetPassword', RATE_LIMIT_CONFIGS.resetPassword);
+
+  if (!rateLimitResult.allowed) {
+    return NextResponse.json(
+      {
+        error: 'Too many password reset attempts. Please try again later.',
+        retryAfter: rateLimitResult.retryAfter,
+      },
+      {
+        status: 429,
+        headers: getRateLimitHeaders(rateLimitResult),
+      }
+    );
+  }
+
   try {
     const body = await request.json();
-    const { token, password } = body;
 
-    // Validate required fields
-    if (!token || !password) {
+    // Validate input with Zod
+    const validationResult = resetPasswordSchema.safeParse(body);
+
+    if (!validationResult.success) {
       return NextResponse.json(
-        { error: 'Token and password are required' },
-        { status: 400 }
+        {
+          error: 'Validation failed',
+          details: validationResult.error.flatten(),
+        },
+        {
+          status: 400,
+          headers: getRateLimitHeaders(rateLimitResult),
+        }
       );
     }
 
-    // Validate password strength
-    if (password.length < 8) {
-      return NextResponse.json(
-        { error: 'Password must be at least 8 characters' },
-        { status: 400 }
-      );
-    }
+    const { token, password } = validationResult.data;
 
     // Hash the token to compare with stored hash
     const tokenHash = crypto
@@ -41,7 +83,10 @@ export async function POST(request: NextRequest) {
     if (!user) {
       return NextResponse.json(
         { error: 'Invalid or expired reset token' },
-        { status: 400 }
+        {
+          status: 400,
+          headers: getRateLimitHeaders(rateLimitResult),
+        }
       );
     }
 
