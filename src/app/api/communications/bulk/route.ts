@@ -3,6 +3,12 @@ import { getSession } from '@/lib/auth';
 import { prisma } from '@/lib/db';
 import { sendSMS, applyTemplate, isSMSConfigured } from '@/lib/sms';
 import { z } from 'zod';
+import {
+  checkRateLimit,
+  getClientIp,
+  getRateLimitHeaders,
+  RATE_LIMIT_CONFIGS,
+} from '@/lib/rate-limit';
 
 // Validation schema for bulk SMS
 const bulkSMSSchema = z.object({
@@ -25,6 +31,24 @@ interface BulkSendResult {
  * Sends bulk SMS messages to multiple leads
  */
 export async function POST(request: NextRequest) {
+  const clientIp = getClientIp(request);
+
+  // Check rate limit for bulk SMS operations
+  const rateLimitResult = checkRateLimit(clientIp, 'bulkSms', RATE_LIMIT_CONFIGS.bulkSms);
+
+  if (!rateLimitResult.allowed) {
+    return NextResponse.json(
+      {
+        error: 'Too many bulk SMS requests. Please try again later.',
+        retryAfter: rateLimitResult.retryAfter,
+      },
+      {
+        status: 429,
+        headers: getRateLimitHeaders(rateLimitResult, RATE_LIMIT_CONFIGS.bulkSms),
+      }
+    );
+  }
+
   try {
     const session = await getSession();
     if (!session) {
@@ -83,6 +107,7 @@ export async function POST(request: NextRequest) {
       body: string;
       status: string;
       templateId?: string;
+      sentAt: Date;
     }[] = [];
 
     // Send SMS to each lead
@@ -148,6 +173,7 @@ export async function POST(request: NextRequest) {
         body: finalBody,
         status: sendResult.success ? 'sent' : 'failed',
         templateId: templateId,
+        sentAt: new Date(),
       });
     }
 

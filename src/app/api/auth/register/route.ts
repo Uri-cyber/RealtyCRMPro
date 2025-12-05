@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
+import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/db';
 import { hashPassword, generateToken, setAuthCookie, JWTPayload } from '@/lib/auth';
 import {
@@ -95,7 +96,7 @@ export async function POST(request: NextRequest) {
     const passwordHash = await hashPassword(password);
 
     // Create tenant and user in a transaction for atomicity
-    const result = await prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       // Create tenant first (new user gets their own tenant)
       const tenant = await tx.tenant.create({
         data: {

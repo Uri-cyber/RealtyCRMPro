@@ -171,9 +171,9 @@ export function resetRateLimit(identifier: string, endpoint: string): void {
 /**
  * Creates rate limit headers to include in the response
  */
-export function getRateLimitHeaders(result: RateLimitResult): Record<string, string> {
+export function getRateLimitHeaders(result: RateLimitResult, config?: RateLimitConfig): Record<string, string> {
   return {
-    'X-RateLimit-Limit': result.remaining.toString(),
+    'X-RateLimit-Limit': config ? config.maxRequests.toString() : (result.remaining + 1).toString(),
     'X-RateLimit-Remaining': Math.max(0, result.remaining).toString(),
     'X-RateLimit-Reset': Math.ceil(result.resetAt / 1000).toString(),
     ...(result.retryAfter > 0 && { 'Retry-After': result.retryAfter.toString() }),
