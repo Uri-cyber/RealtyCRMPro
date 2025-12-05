@@ -1,0 +1,348 @@
+// Prisma Schema for RealtyCRM Pro
+// Azure SQL Database compatible
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlserver"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// Core Models
+// ============================================
+
+model Tenant {
+  id               String    @id @default(uuid())
+  name             String
+  subscriptionTier String    @default("starter") // starter, pro, enterprise
+  maxUsers         Int       @default(1)
+  maxListings      Int       @default(25)
+  isActive         Boolean   @default(true)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  // Relations
+  users      User[]
+  properties Property[]
+  leads      Lead[]
+  showings   Showing[]
+
+  @@map("tenants")
+}
+
+model User {
+  id              String    @id @default(uuid())
+  tenantId        String
+  email           String    @unique
+  passwordHash    String
+  firstName       String
+  lastName        String
+  phone           String?
+  profileImageUrl String?
+  role            UserRole  @default(AGENT)
+  licenseNumber   String?
+  bio             String?
+  timezone        String    @default("America/Chicago")
+  isActive        Boolean   @default(true)
+  lastLoginAt     DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  // Relations
+  tenant         Tenant          @relation(fields: [tenantId], references: [id])
+  properties     Property[]
+  leads          Lead[]          @relation("AssignedAgent")
+  showings       Showing[]
+  communications Communication[]
+  activities     ActivityLog[]
+  templates      MessageTemplate[]
+
+  @@index([tenantId])
+  @@index([email])
+  @@map("users")
+}
+
+enum UserRole {
+  SELLER
+  AGENT
+  MANAGER
+  ADMIN
+}
+
+// ============================================
+// Property Management
+// ============================================
+
+model Property {
+  id           String         @id @default(uuid())
+  tenantId     String
+  userId       String
+  address      String
+  city         String
+  state        String         @db.VarChar(2)
+  zipCode      String         @db.VarChar(10)
+  bedrooms     Int
+  bathrooms    Float
+  sqft         Int
+  price        Decimal        @db.Decimal(12, 2)
+  status       PropertyStatus @default(FOR_SALE)
+  description  String?        @db.Text
+  mlsNumber    String?
+  yearBuilt    Int?
+  lotSize      String?
+  propertyType PropertyType   @default(SINGLE_FAMILY)
+  photoUrls    String?        @db.Text // JSON array stored as text
+  features     String?        @db.Text // JSON array stored as text
+  listingDate  DateTime       @default(now())
+  soldDate     DateTime?
+  soldPrice    Decimal?       @db.Decimal(12, 2)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  // Relations
+  tenant    Tenant     @relation(fields: [tenantId], references: [id])
+  user      User       @relation(fields: [userId], references: [id])
+  leads     Lead[]
+  showings  Showing[]
+  documents Document[]
+
+  @@index([tenantId])
+  @@index([userId])
+  @@index([status])
+  @@map("properties")
+}
+
+enum PropertyStatus {
+  FOR_SALE
+  UNDER_CONTRACT
+  CLOSED
+  OFF_MARKET
+}
+
+enum PropertyType {
+  SINGLE_FAMILY
+  CONDO
+  TOWNHOUSE
+  MULTI_FAMILY
+  LAND
+  COMMERCIAL
+}
+
+// ============================================
+// Lead Management
+// ============================================
+
+model Lead {
+  id                   String     @id @default(uuid())
+  tenantId             String
+  propertyId           String?
+  assignedAgentId      String?
+  firstName            String
+  lastName             String
+  email                String?
+  phone                String?
+  source               LeadSource @default(WEBSITE)
+  aiScore              Int        @default(0) // 0-100
+  status               LeadStatus @default(NEW)
+  interestedProperties String?    @db.Text // JSON array of property IDs
+  notes                String?    @db.Text
+  lastActivityAt       DateTime   @default(now())
+  createdAt            DateTime   @default(now())
+  updatedAt            DateTime   @updatedAt
+
+  // Relations
+  tenant         Tenant          @relation(fields: [tenantId], references: [id])
+  property       Property?       @relation(fields: [propertyId], references: [id])
+  assignedAgent  User?           @relation("AssignedAgent", fields: [assignedAgentId], references: [id])
+  showings       Showing[]
+  communications Communication[]
+  documents      Document[]
+
+  @@index([tenantId])
+  @@index([propertyId])
+  @@index([assignedAgentId])
+  @@index([status])
+  @@index([aiScore])
+  @@map("leads")
+}
+
+enum LeadSource {
+  WEBSITE
+  FACEBOOK_AD
+  GOOGLE_AD
+  REFERRAL
+  IMPORT
+  MANUAL
+  OTHER
+}
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  SHOWING_SCHEDULED
+  OFFER_RECEIVED
+  CLOSED
+  LOST
+}
+
+// ============================================
+// Showings & Calendar
+// ============================================
+
+model Showing {
+  id              String        @id @default(uuid())
+  tenantId        String
+  propertyId      String
+  leadId          String
+  agentId         String
+  scheduledAt     DateTime
+  durationMinutes Int           @default(30)
+  status          ShowingStatus @default(SCHEDULED)
+  feedback        String?       @db.Text
+  buyerInterest   Int? // 0-100 rating
+  notes           String?       @db.Text
+  reminderSentAt  DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  // Relations
+  tenant   Tenant   @relation(fields: [tenantId], references: [id])
+  property Property @relation(fields: [propertyId], references: [id])
+  lead     Lead     @relation(fields: [leadId], references: [id])
+  agent    User     @relation(fields: [agentId], references: [id])
+
+  @@index([tenantId])
+  @@index([propertyId])
+  @@index([leadId])
+  @@index([agentId])
+  @@index([scheduledAt])
+  @@map("showings")
+}
+
+enum ShowingStatus {
+  SCHEDULED
+  CONFIRMED
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+// ============================================
+// Communications
+// ============================================
+
+model Communication {
+  id         String            @id @default(uuid())
+  tenantId   String
+  leadId     String
+  userId     String
+  type       CommunicationType
+  subject    String?
+  body       String            @db.Text
+  templateId String?
+  sentAt     DateTime          @default(now())
+  openedAt   DateTime?
+  clickedAt  DateTime?
+  status     String            @default("sent")
+
+  // Relations
+  lead     Lead              @relation(fields: [leadId], references: [id])
+  user     User              @relation(fields: [userId], references: [id])
+  template MessageTemplate?  @relation(fields: [templateId], references: [id])
+
+  @@index([tenantId])
+  @@index([leadId])
+  @@index([userId])
+  @@map("communications")
+}
+
+enum CommunicationType {
+  EMAIL
+  SMS
+  CALL
+}
+
+model MessageTemplate {
+  id        String            @id @default(uuid())
+  userId    String
+  name      String
+  subject   String?
+  body      String            @db.Text
+  type      CommunicationType
+  isDefault Boolean           @default(false)
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+
+  // Relations
+  user           User            @relation(fields: [userId], references: [id])
+  communications Communication[]
+
+  @@index([userId])
+  @@map("message_templates")
+}
+
+// ============================================
+// Documents
+// ============================================
+
+model Document {
+  id           String       @id @default(uuid())
+  tenantId     String
+  propertyId   String?
+  leadId       String?
+  uploadedById String
+  documentType DocumentType
+  fileName     String
+  fileUrl      String
+  fileSize     Int?
+  createdAt    DateTime     @default(now())
+
+  // Relations
+  property Property? @relation(fields: [propertyId], references: [id])
+  lead     Lead?     @relation(fields: [leadId], references: [id])
+
+  @@index([tenantId])
+  @@index([propertyId])
+  @@index([leadId])
+  @@map("documents")
+}
+
+enum DocumentType {
+  CONTRACT
+  INSPECTION
+  DISCLOSURE
+  OFFER
+  APPRAISAL
+  SURVEY
+  HOA
+  OTHER
+}
+
+// ============================================
+// Activity & Audit Log
+// ============================================
+
+model ActivityLog {
+  id         String   @id @default(uuid())
+  tenantId   String
+  userId     String
+  entityType String // 'lead', 'property', 'showing', etc.
+  entityId   String
+  action     String // 'created', 'updated', 'status_changed', etc.
+  details    String?  @db.Text // JSON details
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+
+  // Relations
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([tenantId])
+  @@index([userId])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@map("activity_logs")
+}
